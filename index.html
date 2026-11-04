@@ -389,8 +389,47 @@ function setRec(id, patch) {
   if (next.count < 0) next.count = 0;
   state.owned[id] = next;
   store.write(id);
-  render();
+  updateCard(id);
   if (openId === id) renderSheet();
+}
+
+// 画面全体を作り直さず、対象カードと集計だけ更新（img要素を使い回して再読込みを防ぐ）
+function updateCard(id) {
+  const c = byId[id], r = rec(id), own = r.count > 0;
+  document.querySelectorAll(`[data-id="${id}"]`).forEach(el => {
+    const face = el.querySelector(".face");
+    if (face) {
+      face.classList.toggle("own", own);
+      face.classList.toggle("art", !own);
+      if (own) face.style.setProperty("--tc", `var(${c.set.series.color})`); else face.style.removeProperty("--tc");
+      face.querySelectorAll(".got,.qty,.tag,.wish").forEach(x => x.remove());
+      const extra = own
+        ? `<span class="got">✓</span>${r.count > 1 ? `<span class="qty">×${r.count}</span>` : ""}`
+        : `<span class="tag">未所持</span>`;
+      face.insertAdjacentHTML("beforeend", extra + (r.wish ? `<span class="wish">★</span>` : ""));
+    }
+    if (el.classList.contains("pocket")) {
+      el.classList.toggle("missing", !own);
+      el.setAttribute("aria-label", `${c.name} ${c.label} ${own ? "所持" : "未所持"}`);
+    }
+    const v = el.querySelector(".verdict");
+    if (v) v.outerHTML = own ? `<span class="verdict yes">✓ 持ってる${r.count > 1 ? `（${r.count}枚）` : ""}</span>` : `<span class="verdict no">✕ 持ってない</span>`;
+  });
+  updateCounts(c);
+}
+
+function updateCounts(c) {
+  const total = CARDS.length, got = CARDS.filter(x => has(x.id)).length;
+  document.getElementById("total").innerHTML = `<strong>${got}</strong> / ${total} 枚 · ${Math.round(got / total * 100)}%`;
+  const sr = c.set.series, sEl = document.querySelector(`.series[data-series="${sr.key}"] span`);
+  if (sEl) { const sc = CARDS.filter(x => x.set.series === sr); sEl.textContent = `${sc.filter(x => has(x.id)).length} / ${sc.length}`; }
+  const sec = document.querySelector(`section.set[data-set="${c.set.code}"]`);
+  if (sec) {
+    const cs = CARDS.filter(x => x.set === c.set), g = cs.filter(x => has(x.id)).length, done = g === cs.length;
+    sec.querySelector(".count").innerHTML = `<strong>${g}</strong> / ${cs.length}`;
+    sec.querySelector(".code").innerHTML = `${c.set.code} · AR ${cs.length}種 ${done ? `<span class="badge-done">· コンプリート！</span>` : ""}`;
+    const m = sec.querySelector(".meter"); m.classList.toggle("done", done); m.querySelector("i").style.width = `${g / cs.length * 100}%`;
+  }
 }
 
 const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[ch]));
@@ -442,7 +481,7 @@ function render() {
     const inSeries = sets.filter(s => s.series === sr);
     if (!inSeries.length) return "";
     const sc = CARDS.filter(c => c.set.series === sr), sg = sc.filter(c => has(c.id)).length;
-    return `<div class="series" style="--sc: var(${sr.color})"><h2>${esc(sr.name)}</h2><span>${sg} / ${sc.length}</span></div>` + inSeries.map(setHTML).join("");
+    return `<div class="series" data-series="${sr.key}" style="--sc: var(${sr.color})"><h2>${esc(sr.name)}</h2><span>${sg} / ${sc.length}</span></div>` + inSeries.map(setHTML).join("");
   }).join("");
 }
 
@@ -450,7 +489,7 @@ function setHTML(s) {
   const keep = c => state.filter === "all" || (state.filter === "have" && has(c.id)) || (state.filter === "missing" && !has(c.id)) || (state.filter === "wish" && rec(c.id).wish);
   const cs = CARDS.filter(c => c.set === s), g = cs.filter(c => has(c.id)).length, shown = cs.filter(keep);
   const done = g === cs.length;
-  return `<section class="set" aria-label="${esc(s.name)}">
+  return `<section class="set" data-set="${s.code}" aria-label="${esc(s.name)}">
     <div class="set-head"><h3>${esc(s.name)}<span class="kind">${s.kind}</span></h3><div class="count"><strong>${g}</strong> / ${cs.length}</div>
     <div class="code">${s.code} · AR ${cs.length}種 ${done ? `<span class="badge-done">· コンプリート！</span>` : ""}</div></div>
     <div class="meter ${done ? "done" : ""}"><i style="width:${g / cs.length * 100}%"></i></div>
@@ -471,9 +510,7 @@ function renderSheet() {
   document.getElementById("sheetRoot").innerHTML = `<div class="scrim" data-act="close"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(c.name)}"><div class="sheet-in">
     <button class="big" data-act="zoom" aria-label="画像を大きく表示">${faceHTML(c)}<span class="small">タップで拡大</span></button>
-    <div><h3>${esc(c.name)}</h3><div class="meta">${esc(c.set.name)}（${c.set.code}）<br>${c.label} · AR</div>
-      <p><a class="official" href="https://www.pokemon-card.com/card-search/details.php/card/${c.official}/regu/all" target="_blank" rel="noopener">公式サイトでカードを見る</a></p>
-      <div class="state">${r.count > 0 ? `<span class="verdict yes">✓ 持ってる</span>` : `<span class="verdict no">✕ 持ってない</span>`}</div></div>
+    <div><h3>${esc(c.name)}</h3><div class="meta">${esc(c.set.name)}（${c.set.code}）<br>${c.label} · AR</div></div>
     <div class="controls">
       <div class="row">
         <span class="small">枚数</span><span class="stepper"><button data-act="minus" aria-label="1枚減らす" ${r.count > 0 ? "" : "disabled"}>−</button><output>${r.count}</output><button data-act="plus" aria-label="1枚増やす">＋</button></span>
