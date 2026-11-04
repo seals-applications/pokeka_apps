@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ARずかん</title>
+<meta name="description" content="ポケモンカード AR（アートレア）全547種の所持チェック図鑑">
+<meta name="theme-color" content="#3442c9">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ARずかん">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&family=Noto+Sans+JP:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap">
@@ -165,6 +172,13 @@ section.set { background: var(--page); border: 1px solid var(--line); border-rad
 .small { font-size: 12px; color: var(--muted); }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(24px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--page); padding: 8px 16px; border-radius: 10px; z-index: 30; font-size: 14px; }
 .face.art { border: 2px dashed var(--pocket-ink); }
+/* 未所持: 少し暗く・彩度控えめ */
+.face.art img { filter: grayscale(.5) brightness(.8); transition: filter .25s ease; }
+.face.art::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: rgba(20,24,40,.12); }
+@media (hover: hover) { .face.art:hover img { filter: grayscale(.2) brightness(.95); } }
+/* 所持: くっきり＋緑の縁取り */
+.face.own img { filter: none; }
+.face.own { box-shadow: 0 0 0 2px var(--have), 0 4px 12px rgba(0,0,0,.18); }
 .face .tag { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; font-weight: 600; text-align: center; line-height: 1.7; }
 .face .got { position: absolute; right: 4px; top: 4px; z-index: 1; width: 20px; height: 20px; border-radius: 50%; background: var(--have); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
 header.bar { transition: transform .25s ease; }
@@ -204,7 +218,7 @@ header.bar.hide { transform: translateY(calc(-100% - env(safe-area-inset-top, 0p
 // ---------- Supabase Settings ----------
 const SUPABASE_URL = "https://klkycfdlrboacolcalti.supabase.co"; // ご自身のURLに差し替えてください
 const SUPABASE_KEY = "sb_publishable_7DuQRWYOieir5_VOPygspQ_3UFRan_Q";       // ご自身のPublishable keyに差し替えてください
-const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }) : null;
 const STORAGE_BUCKET_BASE = `${SUPABASE_URL}/storage/v1/object/public/card-images/`;
 
 const SERIES = [
@@ -268,14 +282,14 @@ const state = { owned: {}, filter: "all", quick: false, q: "", backend: "loading
 
 const store = {
   async init() {
-    if (!supabase) {
+    if (!sb) {
       useLocal("Supabaseクライアントの初期化に失敗したため、端末に保存しています。");
       return;
     }
 
     try {
       // 1. Supabaseから全カードの登録データ（所持状況・画像URL）を取得
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from('cards')
         .select('*')
         .limit(1000);
@@ -283,25 +297,24 @@ const store = {
       if (error) throw error;
 
       const next = {};
+      const byOfficial = Object.fromEntries(CARDS.map(c => [String(c.official), c]));
+      const used = new Set();
       (data || []).forEach(row => {
-        // カード名と画像URLの突き合わせ
-        const matched = CARDS.find(c => c.name === row.name && !c.imageUrl);
-        if (matched) {
-          matched.imageUrl = row.image_url;
-          matched.dbId = row.id;
-        }
-
-        // 所持状況のマッピング
-        const targetCard = CARDS.find(c => c.name === row.name);
-        if (targetCard) {
-          next[targetCard.id] = {
-            count: row.is_owned ? 1 : 0,
-            wish: row.is_wish || false,
-            memo: row.memo || "",
-            dbId: row.id,
-            imageUrl: row.image_url
-          };
-        }
+        // 画像ファイル名の公式カードID（例: _048061_）で突き合わせ、無ければ未使用の同名カード
+        const m = decodeURIComponent(row.image_url || "").match(/_0*(\d{4,6})_/);
+        let card = m && byOfficial[m[1]];
+        if (!card || used.has(card.id)) card = CARDS.find(c => c.name === row.name && !used.has(c.id));
+        if (!card) { console.warn('未対応のDB行', row.id, row.name); return; }
+        used.add(card.id);
+        card.imageUrl = row.image_url;
+        card.dbId = row.id;
+        next[card.id] = {
+          count: row.is_owned ? 1 : 0,
+          wish: row.is_wish || false,
+          memo: row.memo || "",
+          dbId: row.id,
+          imageUrl: row.image_url
+        };
       });
 
       state.owned = next;
@@ -319,7 +332,7 @@ const store = {
     const rec = state.owned[id];
     saveLocal(); // ローカルフォールバック保存も並行
 
-    if (state.backend !== "supabase" || !supabase) return;
+    if (state.backend !== "supabase" || !sb) return;
 
     clearTimeout(this.pending[id]);
     this.pending[id] = setTimeout(async () => {
@@ -330,12 +343,16 @@ const store = {
           updated_at: new Date().toISOString()
         };
 
-        if (rec.dbId) {
-          await supabase.from('cards').update(payload).eq('id', rec.dbId);
-        } else {
-          await supabase.from('cards').update(payload).eq('name', card.name);
+        let q = sb.from('cards').update(payload);
+        q = (rec && rec.dbId) ? q.eq('id', rec.dbId) : q.eq('name', card.name);
+        const { data, error } = await q.select('id');
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          console.warn('更新対象0件（RLSのUPDATEポリシーを確認）', id);
+          toast("サーバーに保存できませんでした（権限設定を確認してください）");
         }
       } catch (err) {
+        console.error('Supabase update failed:', err);
         toast("保存できませんでした。通信環境を確認してください。");
       }
     }, 400);
@@ -383,14 +400,13 @@ function cardImgSrc(c) {
   const r = rec(c.id);
   if (r.imageUrl) return r.imageUrl;
   if (c.imageUrl) return c.imageUrl;
-  // Supabase Storageの命名形式に即したフォールバックURL
-  return `${STORAGE_BUCKET_BASE}${encodeURIComponent(c.name)}.jpg`;
+  return ""; // DB読込前は画像なし（推測URLは400になるため使わない）
 }
 
 function faceHTML(c, extraCls = "") {
   const r = rec(c.id), wish = r.wish ? `<span class="wish">★</span>` : "";
   const imgSrc = cardImgSrc(c);
-  const imgTag = `<img src="${esc(imgSrc)}" alt="${esc(c.name)}" loading="lazy" onerror="this.style.display='none'">`;
+  const imgTag = imgSrc ? `<img src="${esc(imgSrc)}" alt="${esc(c.name)}" loading="lazy" onerror="this.style.display='none'">` : "";
 
   if (r.count > 0) {
     return `<div class="face own ${extraCls}" style="--tc: var(${c.set.series.color})">${imgTag}<span class="got">✓</span>${r.count > 1 ? `<span class="qty">×${r.count}</span>` : ""}${wish}</div>`;
@@ -532,6 +548,10 @@ window.addEventListener("scroll", () => {
 
 render();
 store.init();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(console.warn));
+}
 </script>
 </body>
 </html>

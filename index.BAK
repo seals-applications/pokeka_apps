@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ARずかん</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&family=Noto+Sans+JP:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<!-- Supabase JS Client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* Layout: binder pages — one sticky search bar, then each set as a page of card pockets */
+:root {
+  --bg: #eef1f6;
+  --page: #ffffff;
+  --fg: #1b2030;
+  --muted: #687087;
+  --line: #d9dee8;
+  --accent: #3442c9;
+  --accent-soft: #e3e6fb;
+  --have: #1f8a55;
+  --have-soft: #dff3e8;
+  --miss: #c23b3b;
+  --miss-soft: #fbe5e5;
+  --pocket: #e4e8ef;
+  --pocket-ink: #a3abbd;
+  --s-mega: #b4427a; --s-sv: #3a6fc4; --s-swsh: #3f8a64; --star: #d6a514;
+  --font-display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Noto Sans JP", sans-serif;
+  --font-body: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11141c; --page: #1a1e29; --fg: #e8ebf3; --muted: #959cb2; --line: #2c3242;
+  --accent: #8d98ff; --accent-soft: #262c52; --have: #4cc488; --have-soft: #173627;
+  --miss: #ff7d7d; --miss-soft: #3c1f22; --pocket: #232836; --pocket-ink: #586079;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #11141c; --page: #1a1e29; --fg: #e8ebf3; --muted: #959cb2; --line: #2c3242;
+  --accent: #8d98ff; --accent-soft: #262c52; --have: #4cc488; --have-soft: #173627;
+  --miss: #ff7d7d; --miss-soft: #3c1f22; --pocket: #232836; --pocket-ink: #586079;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px; margin: 0;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 980px; margin: 0 auto; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+header.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  padding-block: 12px 10px; display: grid; gap: 10px;
+}
+.brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.brand h1 { font-family: var(--font-display); font-weight: 800; font-size: 22px; margin: 0; letter-spacing: .02em; }
+.brand h1 b { color: var(--accent); }
+.total { font-family: var(--font-num); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.total strong { color: var(--fg); font-size: 15px; }
+.search { position: relative; }
+.search input {
+  width: 100%; font: inherit; font-size: 17px; padding: 12px 44px 12px 14px; border-radius: 12px;
+  border: 2px solid var(--line); background: var(--page); color: var(--fg);
+}
+.search input:focus { border-color: var(--accent); outline: none; }
+.search .clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; font-size: 20px; width: 36px; height: 36px; color: var(--muted); cursor: pointer; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip {
+  border: 1.5px solid var(--line); background: var(--page); border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--page); }
+.chip.mode[aria-pressed="true"] { background: var(--have); border-color: var(--have); }
+.tools .spacer { flex: 1; }
+.setsel { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--page); color: var(--fg); max-width: 100%; }
+.series { display: flex; align-items: baseline; gap: 10px; margin: 28px 0 -4px; }
+.series h2 { font-family: var(--font-display); font-weight: 800; font-size: 15px; letter-spacing: .06em; margin: 0; color: var(--sc); }
+.series span { font-family: var(--font-num); font-size: 12px; color: var(--muted); }
+.series::after { content: ""; flex: 1; height: 2px; background: var(--sc); opacity: .35; align-self: center; }
+.kind { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; margin-left: 6px; vertical-align: 2px; }
+.official { font-size: 14px; color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+.notice { font-size: 13px; color: var(--muted); background: var(--page); border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; }
+.notice[data-kind="mode"] { border-style: solid; border-color: var(--have); color: var(--fg); background: var(--have-soft); }
+
+/* search results */
+.results { display: grid; gap: 10px; margin-top: 4px; }
+.hit {
+  display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; text-align: left;
+  background: var(--page); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; cursor: pointer; width: 100%;
+}
+.hit .mini { width: 64px; }
+.hit .nm { font-family: var(--font-display); font-weight: 800; font-size: 18px; line-height: 1.3; }
+.hit .meta { font-size: 12px; color: var(--muted); }
+.verdict { font-family: var(--font-display); font-weight: 800; font-size: 17px; padding: 6px 12px; border-radius: 10px; white-space: nowrap; }
+.verdict.yes { background: var(--have-soft); color: var(--have); }
+.verdict.no { background: var(--miss-soft); color: var(--miss); }
+.empty { color: var(--muted); text-align: center; padding: 32px 0; }
+
+/* sets */
+section.set { background: var(--page); border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin-top: 16px; }
+.set-head { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: end; }
+.set-head h3 { font-family: var(--font-display); font-weight: 800; font-size: 19px; margin: 0; text-wrap: balance; }
+.set-head .code { font-family: var(--font-num); font-size: 12px; color: var(--muted); }
+.set-head .count { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 14px; text-align: right; grid-row: span 2; align-self: center; }
+.set-head .count strong { font-size: 22px; }
+.meter { height: 8px; background: var(--pocket); border-radius: 99px; overflow: hidden; margin: 12px 0 14px; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s; }
+.meter.done i { background: var(--have); }
+.badge-done { font-size: 12px; font-weight: 600; color: var(--have); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+@media (min-width: 640px) { .grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); } }
+.pocket { border: 0; padding: 0; background: none; cursor: pointer; text-align: left; display: grid; gap: 4px; min-width: 0; }
+.face {
+  position: relative; aspect-ratio: 63 / 88; max-width: 100%; border-radius: 8px; overflow: hidden;
+  background: var(--pocket); border: 2px dashed var(--pocket-ink); display: grid; place-items: center;
+}
+.face .no { font-family: var(--font-num); font-size: 13px; color: var(--pocket-ink); }
+.face .sil { font-family: var(--font-display); font-weight: 800; font-size: 30px; color: var(--pocket-ink); opacity: .6; }
+.face.own { border: 0; background: var(--tc, var(--s-sv)); }
+.face.own::after { content: ""; position: absolute; inset: 0; background: linear-gradient(150deg, rgba(255,255,255,.35), rgba(255,255,255,0) 45%, rgba(0,0,0,.18)); pointer-events: none; }
+.face.own .ini { font-family: var(--font-display); font-weight: 800; font-size: 28px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.face img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.face .qty { position: absolute; right: 4px; bottom: 4px; z-index: 1; background: rgba(0,0,0,.6); color: #fff; font-family: var(--font-num); font-size: 11px; border-radius: 6px; padding: 0 5px; }
+.face .wish { position: absolute; left: 4px; top: 2px; z-index: 1; color: var(--star); font-size: 16px; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+.pocket .lbl { font-size: 12px; line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
+.pocket .lbl span { display: block; font-family: var(--font-num); font-size: 11px; color: var(--muted); }
+.pocket.missing .lbl { color: var(--muted); }
+
+/* sheet */
+.scrim { position: fixed; inset: 0; background: rgba(10,12,20,.45); z-index: 20; }
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; background: var(--page); border-radius: 20px 20px 0 0;
+  padding: 18px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  max-height: 88vh; overflow-y: auto; box-shadow: 0 -8px 30px rgba(0,0,0,.18);
+}
+.sheet-in { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: 120px 1fr; gap: 16px; }
+.sheet .big { width: 120px; border: 0; padding: 0; background: none; cursor: zoom-in; display: grid; gap: 4px; text-align: center; }
+.sheet .big .small { font-size: 11px; }
+.zoom { position: fixed; inset: 0; z-index: 40; background: rgba(8,10,16,.88); display: grid; place-items: center; align-content: center; gap: 14px; cursor: zoom-out;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.zoom-card { position: relative; width: min(92vw, calc((100vh - 120px) * 63 / 88)); aspect-ratio: 63 / 88; max-width: 100%; border-radius: 4.5% / 3.2%; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); background: #fff; }
+.zoom-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.zoom-cap { color: #fff; font-size: 14px; text-align: center; }
+.zoom-cap b { font-family: var(--font-display); font-size: 17px; }
+.sheet h3 { font-family: var(--font-display); font-weight: 800; font-size: 22px; margin: 0; line-height: 1.3; }
+.sheet .meta { font-size: 13px; color: var(--muted); }
+.sheet .state { margin-top: 8px; }
+.controls { grid-column: 1 / -1; display: grid; gap: 10px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn { border: 1.5px solid var(--line); background: var(--page); border-radius: 12px; padding: 10px 14px; font-weight: 600; cursor: pointer; }
+.btn.primary { background: var(--have); border-color: var(--have); color: var(--page); }
+.btn.danger { color: var(--miss); }
+.btn.wide { flex: 1; text-align: center; }
+.stepper { display: inline-flex; align-items: center; border: 1.5px solid var(--line); border-radius: 12px; overflow: hidden; }
+.stepper button { border: 0; background: none; width: 44px; height: 42px; font-size: 20px; cursor: pointer; }
+.stepper button:disabled { opacity: .3; cursor: default; }
+.stepper output { min-width: 48px; text-align: center; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.memo { width: 100%; font: inherit; padding: 8px 10px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--bg); color: var(--fg); resize: vertical; min-height: 60px; }
+.small { font-size: 12px; color: var(--muted); }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(24px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--page); padding: 8px 16px; border-radius: 10px; z-index: 30; font-size: 14px; }
+.face.art { border: 2px dashed var(--pocket-ink); }
+.face .tag { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; font-weight: 600; text-align: center; line-height: 1.7; }
+.face .got { position: absolute; right: 4px; top: 4px; z-index: 1; width: 20px; height: 20px; border-radius: 50%; background: var(--have); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+header.bar { transition: transform .25s ease; }
+header.bar.hide { transform: translateY(calc(-100% - env(safe-area-inset-top, 0px))); }
+@media (prefers-reduced-motion: reduce) { .meter i, header.bar { transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="bar">
+    <div class="brand">
+      <h1>AR<b>ずかん</b></h1>
+      <div class="total" id="total">— / — 枚</div>
+    </div>
+    <div class="search">
+      <input id="q" type="search" inputmode="search" autocomplete="off" placeholder="持ってる？ 名前か番号で検索（例：ぴかちゅう / 173）" aria-label="カードを検索">
+      <button class="clear" id="clear" aria-label="検索をクリア" hidden>×</button>
+    </div>
+    <div class="tools" id="tools">
+      <button class="chip" data-filter="all" aria-pressed="true">すべて</button>
+      <button class="chip" data-filter="missing" aria-pressed="false">未所持</button>
+      <button class="chip" data-filter="have" aria-pressed="false">所持中</button>
+      <button class="chip" data-filter="wish" aria-pressed="false">☆ 欲しい</button>
+      <select class="setsel" id="setSel" aria-label="表示する弾"><option value="">すべての弾</option></select>
+      <span class="spacer"></span>
+      <button class="chip mode" id="quick" aria-pressed="false">連続登録</button>
+    </div>
+    <div class="notice" id="notice">Supabaseからコレクションを読み込んでいます…</div>
+  </header>
+  <main id="main"></main>
+</div>
+<div id="sheetRoot"></div>
+<div id="zoomRoot"></div>
+
+<script>
+// ---------- Supabase Settings ----------
+const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co"; // ご自身のURLに差し替えてください
+const SUPABASE_KEY = "YOUR_SUPABASE_PUBLISHABLE_KEY";       // ご自身のPublishable keyに差し替えてください
+const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const STORAGE_BUCKET_BASE = `${SUPABASE_URL}/storage/v1/object/public/card-images/`;
+
+const SERIES = [
+  { key: "mega", name: "MEGA", color: "--s-mega" },
+  { key: "sv", name: "スカーレット＆バイオレット", color: "--s-sv" },
+  { key: "swsh", name: "ソード＆シールド", color: "--s-swsh" },
+];
+
+const SET_ROWS = [
+  ["M6","ストームエメラルダ","拡張","mega",77,"076",50518,"アメモース|ガーディ|ブーバーン|カイオーガ|エレキブル|バチンウニ|ラブトロス|グラードン|マーイーカ|ルリリ|チルタリス|カクレオン"],
+  ["M5","アビスアイ","拡張","mega",82,"081",50302,"カリキリ|グレンアルマ|トサキント|アシレーヌ|ライボルト|ヤドラン|ダダリン|フォクスライ|ザルード|トリデプス|ドデカバシ|シルヴァディ"],
+  ["M4","ニンジャスピナー","拡張","mega",84,"083",50183,"ハリマロン|フォッコ|ケロマツ|ゲコガシラ|デンリュウ|ゼルネアス|ネンドール|クロバット|メタング|ヌメイル|ケンタロス|ミルホッグ"],
+  ["M3","ムニキスゼロ","拡張","mega",81,"080",50048,"コフーライ|モクロー|ファイアロー|アマルルガ|デデンネ|ピッピ|ニャスパー|ダイノーズ|チゴラス|ドラピオン|ニダンギル|ラッタ"],
+  ["M2a","MEGAドリームex","ハイクラス","mega",194,"193",49954,"アゲハント|ドクケイル|スボミー|ヒビキのマグカルゴ|ドンメル|コダック|ユキワラシ|エレザード|ムウマ|トゲキッス|ホップのオーロット|ロケット団のミミッキュ|ロケット団のダグトリオ|チャーレム|シロナのミカルゲ|ガラル タチフサグマ|Nのゼクロム|ドラメシヤ|ドロンチ|スピンロトム"],
+  ["M2","インフェルノX","拡張","mega",81,"080",48487,"ルンパッパ|マメバッタ|カルボウ|ジュゴン|ポッチャマ|ワンパチ|ザシアン|フライゴン|ストリンダー|トゲデマル|プクリン|エテボース"],
+  ["M1S","メガシンフォニア","拡張","mega",64,"063",48450,"ツボツボ|テッカニン|シシコ|ユキカブリ|ブロスター|インテレオン|エリキテル|フーディン|ヌケニン|ハカドッグ|デリバード|ヌイコグマ"],
+  ["M1L","メガブレイブ","拡張","mega",64,"063",48421,"フシギダネ|フシギソウ|ナッシー|ロコン|リオル|マーシャドー|キョジオーン|ミカルゲ|シルシュルー|ハガネール|オニスズメ|デカグース"],
+  ["SV11W","ホワイトフレア","拡張","sv",87,"086",47999,"クルミル|クルマユ|ハハコモリ|モンメン|シキジカ|メブキジカ|チョボマキ|アギルダー|ビリジオン|ポカブ|チャオブー|エンブオー|バオップ|バオッキー|クイタラン|ミジュマル|フタチマル|ダイケンキ|バスラオ|コアルヒー|スワンナ|バニプッチ|バニリッチ|バイバニラ|シママ|ゼブライカ|バチュル|デンチュラ|マッギョ|コロモリ|ココロモリ|シンボラー|デスマス|デスカーン|ゴチム|ゴチミル|ゴチルゼル|プルリル|ダンゴロ|ガントル|ギガイアス|ダゲキ|アーケン|アーケオス|コジョフー|コジョンド|テラキオン|チョロネコ|レパルダス|ズルッグ|ズルズキン|ヤブクロン|ダストダス|ゾロア|ゾロアーク|モノズ|ジヘッド|テッシード|ナットレイ|ギアル|ギギアル|ギギギアル|アイアント|クリムガン|ミネズミ|ミルホッグ|ヨーテリー|ハーデリア|ムーランド|ワシボン|ウォーグル|トルネロス"],
+  ["SV11B","ブラックボルト","拡張","sv",87,"086",47911,"ツタージャ|ジャノビー|ヤナップ|ヤナッキー|チュリネ|ドレディア|マラカッチ|カブルモ|タマゲタケ|モロバレル|ビクティニ|ダルマッカ|ヒヒダルマ|ヒトモシ|ランプラー|シャンデラ|メラルバ|ウルガモス|ヒヤップ|ヒヤッキー|オタマロ|ガマガル|ガマゲロゲ|プロトーガ|アバゴーラ|ママンボウ|クマシュン|ツンベアー|フリージオ|エモンガ|シビシラス|シビビール|シビルドン|ボルトロス|ムンナ|ムシャーナ|ユニラン|ダブラン|ランクルス|リグレー|オーベム|ゴビット|ゴルーグ|モグリュー|ドッコラー|ドテッコツ|ローブシン|ナゲキ|イシズマイ|イワパレス|ランドロス|フシデ|ホイーガ|ペンドラー|メグロコ|ワルビル|ワルビアル|バルチャイ|バルジーナ|シュバルゴ|コマタナ|キリキザン|コバルオン|キバゴ|オノンド|オノノクス|マメパト|ハトーボー|ケンホロウ|タブンネ|チラーミィ|チラチーノ"],
+  ["SV10","ロケット団の栄光","拡張","sv",99,"098",47503,"ロケット団のワナイダー|ロケット団のヘルガー|バシャーモ|パールル|ロケット団のソーナンス|ロケット団のイオルブ|ロケット団のマタドガス|ロケット団のヤミカラス|ザマゼンタ|ロケット団のラッタ|ロケット団のニャース|ガルーラ"],
+  ["SV9a","熱風のアリーナ","強化拡張","sv",64,"063",47365,"ヤンヤンマ|シロナのロズレイド|シェイミ|イワパレス|カミツオロチ|ギャロップ|ヒビキのバクフーン|カスミのコダック|カスミのラプラス|ラクライ|ロトム|ペパーのヨクバリス"],
+  ["SV9","バトルパートナーズ","拡張","sv",101,"100",47221,"マラカッチ|フリーザー|ホエルオー|ナンジャモのタイカイデン|リーリエのアブリボン|ウリムー|ルガルガン|Nのゾロア|Nのレシラム|オオタチ|オンバット|ホップのウールー"],
+  ["SV8","超電ブレイカー","拡張","sv",107,"106",46630,"ビビヨン|メラルバ|ソウブレイズ|ヒンバス|タマザラシ|レアコイル|マッギョ|エムリット|ゴマゾウ|アローラ ダグトリオ|ナマケロ|カクレオン"],
+  ["SV7a","楽園ドラゴーナ","強化拡張","sv",65,"064",46311,"タマタマ|マシェード|ポワルン たいようのすがた|ハギギシリ|ハルクジラ|ラティオス|ビブラーバ|タタッコ|エアームド|アップリュー|タルップル|ウォーグル"],
+  ["SV7","ステラミラクル","拡張","sv",103,"102",46151,"レディアン|リリーラ|バクガメス|ラビフット|ケケンカニ|バチュル|ゼラオラ|マホミル|アサナン|ゴクリン|ブリジュラス|ヨルノズク"],
+  ["SV6a","ナイトワンダラー","強化拡張","sv",65,"064",46042,"カプ・ブルル|ヘルガー|タッツー|ヨマワル|サマヨール|ヨノワール|クレセリア|ゾロア|ゾウドウ|オノンド|ペルシアン|キテルグマ"],
+  ["SV6","変幻の仮面","拡張","sv",102,"101",45844,"キマワリ|カミッチュ|ユキメノコ|カイデン|チリーン|マシマシラ|キチキギス|ドッコラー|イイネイヌ|コドラ|シャリタツ|ラッキー"],
+  ["SV5a","クリムゾンヘイズ","強化拡張","sv",67,"066",45662,"カイロス|チャデス|コータス|ゴウカザル|フィオネ|ウッウ|エレザード|ラブトロス|ヒスイ ガーディ|ダイノーズ|カジッチュ|イーブイ"],
+  ["SV5M","サイバージャッジ","拡張","sv",72,"071",45544,"ダーテング|シキジカ|メブキジカ|ニャビー|デンヂムシ|テツノイバラ|アブリー|ドリュウズ|メタグロス|メルタン|ベロリンガ|ジジーロン"],
+  ["SV5K","ワイルドフォース","拡張","sv",72,"071",45515,"ハヤシガメ|ユキハミ|ドーミラー|ランクルス|ハバタクカミ|ジーランス|バンバドロ|アーボック|ゴース|ペラップ|チラーミィ|チラチーノ"],
+  ["SV4a","シャイニートレジャーex","ハイクラス","sv",338,"190",45124,"ウミトリオ|イルカマン|パモ|ミミッキュ"],
+  ["SV4M","未来の一閃","拡張","sv",67,"066",44446,"レドームシ|リククラゲ|テツノドクガ|バニリッチ|テツノツツミ|シママ|クエスパトラ|ハガネール|エイパム|チルット|ポリゴンZ|テツノコウベ"],
+  ["SV4K","古代の咆哮","拡張","sv",67,"066",44420,"イワパレス|ブビィ|コソクムシ|ミガルーサ|サケブシッポ|コジョンド|キョジオーン|チヲハウハネ|ダストダス|モルペコ|アラブルタケ|ドゴーム"],
+  ["SV3a","レイジングサーフ","強化拡張","sv",63,"062",44379,"ユキワラシ|タマンタ|プラスル|マイナン|バチュル|コレクレー|グラードン|メテノ|イベルタル|ナットレイ|ギルガルド|モトトカゲ"],
+  ["SV3","黒炎の支配者","拡張","sv",109,"108",44135,"クサイハナ|キュウコン|イルカマン|ハラバリー|ピィ|ヨーギラス|デルビル|ハッサム|ブロロン|ポッポ|ピジョン|グルトン"],
+  ["SV2a","ポケモンカード151","強化拡張","sv",166,"165",43951,"フシギダネ|フシギソウ|ヒトカゲ|リザード|ゼニガメ|カメール|キャタピー|ピカチュウ|ニドキング|コダック|ニョロゾ|ゴーリキー|モンジャラ|バリヤード|オムナイト|カビゴン|ハクリュー|ミュウツー"],
+  ["SV2D","クレイバースト","拡張","sv",72,"071",43640,"ヘラクロス|ヒノヤコマ|ライチュウ|スナバァ|カヌチャン|ナカヌチャン|コジオ|バンギラス|タギングル|イッカネズミ|カラミンゴ|リキキリン"],
+  ["SV2P","スノーハザード","拡張","sv",72,"071",43665,"アノクサ|マリル|コオリッポ|セビエ|セゴール|セグレイブ|ゴチミル|ベラカス|ウソッキー|ミミズズ|ココガラ|ノココッチ"],
+  ["SV1a","トリプレットビート","強化拡張","sv",74,"073",43279,"トロピウス|ニャオハ|ニャローテ|カエンジシ|ホゲータ|アチゲータ|コイキング|クワッス|ウェルカモ|ムウマージ|パルデア ケンタロス|パルデア ウパー"],
+  ["SV1V","バイオレットex","拡張","sv",79,"078",43066,"タマンチュラ|ノノクラゲ|スコヴィラン|ヤドン|ウデッポウ|パチリス|パーモット|スリープ|ボチ|マフィティフ|オトシドリ|ホシガリス"],
+  ["SV1S","スカーレットex","拡張","sv",79,"078",43039,"オリーニョ|グレンアルマ|ウミディグダ|ヘイラッシャ|ラルトス|キルリア|パピモッチ|リオル|メグロコ|ガケガニ|ドドゲザン|ムックル"],
+  ["S12a","VSTARユニバース","ハイクラス","swsh",173,"172",42823,"ヒスイ ビリリダマ|コロトック|ブーバーン|オドリドリ|ラプラス|マナフィ|ケルディオ|エレキブル|ストリンダー|ガラル フリーザー|ミュウ|ルナトーン|デオキシス|ディアンシー|キュワワー|ガラル サンダー|ソルロック|ガラル ファイヤー|アブソル|フォクスライ|ジバコイル|チルタリス|ラティアス|ヒスイ ヌメルゴン|メタモン|ノコッチ|ミルタンク|ビーダル|リオル|チルット|ヨマワル|ビッパ|ピカチュウ|ナエトル|パラス|ポチエナ|メリープ"],
+];
+
+const SETS = SET_ROWS.map(([code, name, kind, series, first, total, firstId, names]) =>
+  ({ code, name, kind, series: SERIES.find(s => s.key === series), first, total, firstId, names: names.split("|") }));
+
+const CARDS = [];
+for (const s of SETS) s.names.forEach((name, i) => {
+  const no = String(s.first + i).padStart(3, "0");
+  CARDS.push({ id: `${s.code.replace(/^SV/, "sv")}-${no}`, set: s, no, name, label: `${no}/${s.total}`, official: s.firstId + i, imageUrl: "" });
+});
+const byId = Object.fromEntries(CARDS.map(c => [c.id, c]));
+
+const norm = t => (t || "").normalize("NFKC").toLowerCase().replace(/[ァ-ヶ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60)).replace(/[\s・ー\-]/g, "");
+for (const c of CARDS) c.key = norm(c.name);
+
+// ---------- State & Supabase Data Store ----------
+const LS_KEY = "arzukan.v1";
+const state = { owned: {}, filter: "all", quick: false, q: "", backend: "loading" };
+
+const store = {
+  async init() {
+    if (!supabase) {
+      useLocal("Supabaseクライアントの初期化に失敗したため、端末に保存しています。");
+      return;
+    }
+
+    try {
+      // 1. Supabaseから全カードの登録データ（所持状況・画像URL）を取得
+      const { data, error } = await supabase
+        .from('cards')
+        .select('*')
+        .limit(1000);
+
+      if (error) throw error;
+
+      const next = {};
+      (data || []).forEach(row => {
+        // カード名と画像URLの突き合わせ
+        const matched = CARDS.find(c => c.name === row.name && !c.imageUrl);
+        if (matched) {
+          matched.imageUrl = row.image_url;
+          matched.dbId = row.id;
+        }
+
+        // 所持状況のマッピング
+        const targetCard = CARDS.find(c => c.name === row.name);
+        if (targetCard) {
+          next[targetCard.id] = {
+            count: row.is_owned ? 1 : 0,
+            wish: row.is_wish || false,
+            memo: row.memo || "",
+            dbId: row.id,
+            imageUrl: row.image_url
+          };
+        }
+      });
+
+      state.owned = next;
+      state.backend = "supabase";
+      setNotice();
+      render();
+    } catch (e) {
+      console.error(e);
+      useLocal("クラウド接続エラーのため、この端末のデータを使用しています。");
+    }
+  },
+
+  pending: {},
+  write(id) {
+    const rec = state.owned[id];
+    saveLocal(); // ローカルフォールバック保存も並行
+
+    if (state.backend !== "supabase" || !supabase) return;
+
+    clearTimeout(this.pending[id]);
+    this.pending[id] = setTimeout(async () => {
+      const card = byId[id];
+      try {
+        const payload = {
+          is_owned: (rec && rec.count > 0),
+          updated_at: new Date().toISOString()
+        };
+
+        if (rec.dbId) {
+          await supabase.from('cards').update(payload).eq('id', rec.dbId);
+        } else {
+          await supabase.from('cards').update(payload).eq('name', card.name);
+        }
+      } catch (err) {
+        toast("保存できませんでした。通信環境を確認してください。");
+      }
+    }, 400);
+  }
+};
+
+function useLocal(msg) {
+  state.backend = "local";
+  try { state.owned = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { state.owned = {}; }
+  toast(msg);
+  setNotice();
+  render();
+}
+
+function saveLocal() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(state.owned)); } catch {}
+}
+
+function setNotice() {
+  const n = document.getElementById("notice");
+  if (state.quick) { n.hidden = true; return; }
+  n.dataset.kind = "";
+  if (state.backend === "local") n.hidden = true;
+  else if (state.backend === "supabase") {
+    n.hidden = !!Object.keys(state.owned).length;
+    n.textContent = "カードをタップして所持状況を登録できます。";
+  }
+}
+
+// ---------- helpers ----------
+const rec = id => state.owned[id] || { count: 0 };
+const has = id => rec(id).count > 0;
+function setRec(id, patch) {
+  const next = { ...rec(id), ...patch, updatedAt: new Date().toISOString() };
+  if (next.count < 0) next.count = 0;
+  state.owned[id] = next;
+  store.write(id);
+  render();
+  if (openId === id) renderSheet();
+}
+
+const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[ch]));
+
+function cardImgSrc(c) {
+  const r = rec(c.id);
+  if (r.imageUrl) return r.imageUrl;
+  if (c.imageUrl) return c.imageUrl;
+  // Supabase Storageの命名形式に即したフォールバックURL
+  return `${STORAGE_BUCKET_BASE}${encodeURIComponent(c.name)}.jpg`;
+}
+
+function faceHTML(c, extraCls = "") {
+  const r = rec(c.id), wish = r.wish ? `<span class="wish">★</span>` : "";
+  const imgSrc = cardImgSrc(c);
+  const imgTag = `<img src="${esc(imgSrc)}" alt="${esc(c.name)}" loading="lazy" onerror="this.style.display='none'">`;
+
+  if (r.count > 0) {
+    return `<div class="face own ${extraCls}" style="--tc: var(${c.set.series.color})">${imgTag}<span class="got">✓</span>${r.count > 1 ? `<span class="qty">×${r.count}</span>` : ""}${wish}</div>`;
+  }
+  return `<div class="face art ${extraCls}">${imgTag}<span class="tag">未所持</span>${wish}</div>`;
+}
+
+let toastT;
+function toast(msg) {
+  let t = document.querySelector(".toast");
+  if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2200);
+}
+
+// ---------- render ----------
+function render() {
+  const total = CARDS.length, got = CARDS.filter(c => has(c.id)).length;
+  document.getElementById("total").innerHTML = `<strong>${got}</strong> / ${total} 枚 · ${Math.round(got / total * 100)}%`;
+  const main = document.getElementById("main");
+  if (state.q) {
+    const q = norm(state.q), qn = state.q.replace(/\D/g, "");
+    const hits = CARDS.filter(c => c.key.includes(q) || (qn && (c.no.includes(qn.padStart(3, "0")) || c.no.replace(/^0+/, "") === qn)));
+    main.innerHTML = hits.length ? `<div class="results">${hits.map(c => {
+      const r = rec(c.id);
+      return `<button class="hit" data-id="${c.id}"><div class="mini">${faceHTML(c)}</div>
+        <div><div class="nm">${esc(c.name)}</div><div class="meta">${esc(c.set.name)} · ${c.label}</div></div>
+        ${r.count > 0 ? `<span class="verdict yes">✓ 持ってる${r.count > 1 ? `（${r.count}枚）` : ""}</span>` : `<span class="verdict no">✕ 持ってない</span>`}</button>`;
+    }).join("")}</div>` : `<p class="empty">「${esc(state.q)}」に当てはまるARは、収録中の${SETS.length}弾にありません。</p>`;
+    return;
+  }
+  const sets = SETS.filter(s => !state.set || s.code === state.set);
+  main.innerHTML = SERIES.map(sr => {
+    const inSeries = sets.filter(s => s.series === sr);
+    if (!inSeries.length) return "";
+    const sc = CARDS.filter(c => c.set.series === sr), sg = sc.filter(c => has(c.id)).length;
+    return `<div class="series" style="--sc: var(${sr.color})"><h2>${esc(sr.name)}</h2><span>${sg} / ${sc.length}</span></div>` + inSeries.map(setHTML).join("");
+  }).join("");
+}
+
+function setHTML(s) {
+  const keep = c => state.filter === "all" || (state.filter === "have" && has(c.id)) || (state.filter === "missing" && !has(c.id)) || (state.filter === "wish" && rec(c.id).wish);
+  const cs = CARDS.filter(c => c.set === s), g = cs.filter(c => has(c.id)).length, shown = cs.filter(keep);
+  const done = g === cs.length;
+  return `<section class="set" aria-label="${esc(s.name)}">
+    <div class="set-head"><h3>${esc(s.name)}<span class="kind">${s.kind}</span></h3><div class="count"><strong>${g}</strong> / ${cs.length}</div>
+    <div class="code">${s.code} · AR ${cs.length}種 ${done ? `<span class="badge-done">· コンプリート！</span>` : ""}</div></div>
+    <div class="meter ${done ? "done" : ""}"><i style="width:${g / cs.length * 100}%"></i></div>
+    ${shown.length ? `<div class="grid">${shown.map(c => `<button class="pocket ${has(c.id) ? "" : "missing"}" data-id="${c.id}" aria-label="${esc(c.name)} ${c.label} ${has(c.id) ? "所持" : "未所持"}">
+      ${faceHTML(c)}<div class="lbl">${esc(c.name)}<span>${c.label}</span></div></button>`).join("")}</div>`
+      : `<p class="small">この条件に当てはまるカードはありません。</p>`}
+  </section>`;
+}
+
+// ---------- detail sheet ----------
+let openId = null;
+function openSheet(id) { openId = id; renderSheet(); }
+function closeSheet() { openId = null; document.getElementById("sheetRoot").innerHTML = ""; }
+
+function renderSheet() {
+  const c = byId[openId], r = rec(openId);
+  const imgSrc = cardImgSrc(c);
+  document.getElementById("sheetRoot").innerHTML = `<div class="scrim" data-act="close"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(c.name)}"><div class="sheet-in">
+    <button class="big" data-act="zoom" aria-label="画像を大きく表示">${faceHTML(c)}<span class="small">タップで拡大</span></button>
+    <div><h3>${esc(c.name)}</h3><div class="meta">${esc(c.set.name)}（${c.set.code}）<br>${c.label} · AR</div>
+      <p><a class="official" href="https://www.pokemon-card.com/card-search/details.php/card/${c.official}/regu/all" target="_blank" rel="noopener">公式サイトでカードを見る</a></p>
+      <div class="state">${r.count > 0 ? `<span class="verdict yes">✓ 持ってる</span>` : `<span class="verdict no">✕ 持ってない</span>`}</div></div>
+    <div class="controls">
+      <div class="row">
+        <span class="small">枚数</span><span class="stepper"><button data-act="minus" aria-label="1枚減らす" ${r.count > 0 ? "" : "disabled"}>−</button><output>${r.count}</output><button data-act="plus" aria-label="1枚増やす">＋</button></span>
+        <button class="btn" data-act="wish" aria-pressed="${!!r.wish}">${r.wish ? "★ 欲しい解除" : "☆ 欲しい"}</button>
+      </div>
+      <textarea class="memo" id="memo" placeholder="メモ（例：美品・〇〇ショップで購入）">${esc(r.memo || "")}</textarea>
+      <button class="btn" data-act="close">閉じる</button>
+    </div>
+  </div></div>`;
+}
+
+// ---------- events ----------
+document.addEventListener("click", e => {
+  const chip = e.target.closest("[data-filter]");
+  if (chip) { state.filter = chip.dataset.filter; document.querySelectorAll("[data-filter]").forEach(b => b.setAttribute("aria-pressed", b === chip)); render(); return; }
+  if (e.target.closest("#quick")) { state.quick = !state.quick; document.getElementById("quick").setAttribute("aria-pressed", state.quick); setNotice(); return; }
+  if (e.target.closest("#clear")) { const q = document.getElementById("q"); q.value = ""; state.q = ""; document.getElementById("clear").hidden = true; render(); q.focus(); return; }
+  const card = e.target.closest(".pocket, .hit");
+  if (card) {
+    const id = card.dataset.id;
+    if (state.quick && card.classList.contains("pocket")) { const now = !has(id); setRec(id, { count: now ? Math.max(1, rec(id).count) : 0 }); }
+    else openSheet(id);
+    return;
+  }
+  const act = e.target.closest("[data-act]")?.dataset.act; if (!act || !openId) return;
+  if (act === "unzoom") { closeZoom(); return; }
+  if (act === "zoom") { openZoom(openId); return; }
+  const r = rec(openId);
+  if (act === "close") closeSheet();
+  else if (act === "plus") setRec(openId, { count: r.count + 1 });
+  else if (act === "minus") setRec(openId, { count: r.count - 1 });
+  else if (act === "wish") setRec(openId, { wish: !r.wish });
+});
+
+document.addEventListener("change", e => {
+  if (e.target.id !== "memo" || !openId) return;
+  state.owned[openId] = { ...rec(openId), memo: e.target.value.trim(), updatedAt: new Date().toISOString() };
+  store.write(openId);
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (document.getElementById("zoomRoot").innerHTML) closeZoom(); else if (openId) closeSheet();
+});
+
+function openZoom(id) {
+  const c = byId[id], r = rec(id);
+  const imgSrc = cardImgSrc(c);
+  document.getElementById("zoomRoot").innerHTML = `<div class="zoom" data-act="unzoom" role="dialog" aria-modal="true" aria-label="${esc(c.name)}の拡大表示">
+    <div class="zoom-card"><img src="${esc(imgSrc)}" alt="${esc(c.name)}"></div>
+    <div class="zoom-cap"><b>${esc(c.name)}</b> ${c.label} ${r.count > 0 ? "✓ 持ってる" : "✕ 持ってない"}<br><span style="opacity:.7">画面をタップすると戻ります</span></div></div>`;
+}
+
+function closeZoom() { document.getElementById("zoomRoot").innerHTML = ""; }
+
+document.getElementById("q").addEventListener("input", e => { state.q = e.target.value.trim(); document.getElementById("clear").hidden = !state.q; render(); });
+
+const setSel = document.getElementById("setSel");
+setSel.insertAdjacentHTML("beforeend", SETS.map(s => `<option value="${s.code}">${esc(s.name)}（${s.code}）</option>`).join(""));
+setSel.addEventListener("change", () => { state.set = setSel.value; render(); window.scrollTo(0, 0); });
+
+// hide the search bar while scrolling
+const bar = document.querySelector("header.bar"), qInput = document.getElementById("q");
+let lastY = window.scrollY;
+window.addEventListener("scroll", () => {
+  const y = window.scrollY, d = y - lastY;
+  if (Math.abs(d) < 6) return;
+  bar.classList.toggle("hide", d > 0 && y > bar.offsetHeight && document.activeElement !== qInput);
+  lastY = y;
+}, { passive: true });
+
+render();
+store.init();
+</script>
+</body>
+</html>
