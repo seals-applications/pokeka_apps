@@ -1,0 +1,6 @@
+echo sprites/ > .gitignore
+echo zoom/ >> .gitignore
+echo *.jpg >> .gitignore
+echo *.png >> .gitignore
+echo .DS_Store >> .gitignore
+echo Thumbs.db >> .gitignore
