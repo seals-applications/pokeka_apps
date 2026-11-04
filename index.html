@@ -339,8 +339,7 @@ const store = {
       const card = byId[id];
       try {
         const payload = {
-          is_owned: (rec && rec.count > 0),
-          updated_at: new Date().toISOString()
+          is_owned: (rec && rec.count > 0)
         };
 
         let q = sb.from('cards').update(payload);
